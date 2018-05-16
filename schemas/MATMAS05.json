@@ -1,0 +1,15 @@
+{
+    "filename": "matmas.csv",
+    "identify": "/MATMAS05",
+    "fields": [
+        {
+            "path": "/MATMAS05/IDOC/EDI_DC40/DOCNUM",
+            "default": "0000000000000000",
+            "enclosure": "\""
+        },
+        {
+            "path": "/MATMAS05/IDOC/E1MARAM/E1MARCM/BESKZ",
+            "default": ""
+        }
+    ]
+}
