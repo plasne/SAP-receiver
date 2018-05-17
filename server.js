@@ -1,6 +1,9 @@
 
 // includes
+const winston = require("winston");
+const cmd = require("commander");
 const fs = require("fs");
+const agentKeepAlive = require("agentkeepalive");
 const config = require("config");
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -13,18 +16,68 @@ const dom = require("xmldom").DOMParser;
 const moment = require("moment");
 require("moment-round");
 
-//const storage = require("azure-storage");
-//const blobService = storage.createBlobServiceWithSas(host, sas);
+// define command line parameters
+cmd
+    .version("0.1.0")
+    .option("-l, --log-level <value>", "The minimum level to log to the console (error, warn, info, verbose, debug, silly).", /^(error|warn|info|verbose|debug|silly)$/i, "error")
+    .option("-d, --debug", "Turn on debugging for the REST API calls.")
+    .parse(process.argv);
 
-require('request-debug')(request);
+// enable logging
+const logger = winston.createLogger({
+    level: cmd.logLevel,
+    transports: [
+        new winston.transports.Console({
+            format: winston.format.combine(
+                winston.format.timestamp(),
+                winston.format.printf(event => {
+                    const color = ((level) => {
+                        switch (level) {
+                            case "error":   return "\x1b[31m"; // red
+                            case "warn":    return "\x1b[33m"; // yellow
+                            case "info":    return "";         // white
+                            case "verbose": return "\x1b[32m"; // green
+                            case "debug":   return "\x1b[32m"; // green
+                            case "silly":   return "\x1b[32m"; // green
+                            default:        return "";         // white
+                        }
+                    })(event.level);
+                    const level = event.level.padStart(7);
+                    if (event.coorelationId) {
+                        return `${event.timestamp} ${color}${level}\x1b[0m ${event.coorelationId}: ${event.message}`;
+                    } else {
+                        return `${event.timestamp} ${color}${level}\x1b[0m: ${event.message}`;
+                    }
+                })
+            )
+        })
+    ]
+});
+console.log(`Log level set to "${cmd.logLevel}".`);
+if (cmd.debug) require('request-debug')(request);
 
 // globals
 const account = config.get("account");
+logger.log("verbose", `account = "${account}".`);
 const container = config.get("container");
+logger.log("verbose", `container = "${container}".`);
 const key = (config.has("key")) ? config.get("key") : null;
-const sas = null; //(config.has("sas")) ? config.get("sas") : null;
+logger.log("verbose", `key is ${(key) ? "defined" : "undefined"}.`);
+//const sas = (config.has("sas")) ? config.get("sas") : null;
+const sas = null;
+logger.log("verbose", `sas is ${(key) ? "defined" : "undefined"}.`);
 const period = config.get("period");
+logger.log("verbose", `period = "${period}".`);
 const format = (config.has("format")) ? config.get("format") : "YYYYMMDDTHHmmss";
+logger.log("verbose", `format = "${format}".`);
+
+// use an HTTP(s) agent with keepalive and connection pooling
+const agent = new agentKeepAlive.HttpsAgent({
+    maxSockets: 40,
+    maxFreeSockets: 10,
+    timeout: 60000,
+    freeSocketKeepAliveTimeout: 30000
+});
 
 // start up express
 const app = express();
@@ -32,7 +85,12 @@ app.use(bodyParser.text({
     type: () => { return true; }
 }));
 
-function generateSignature(filename, options) {
+String.prototype.replaceAll = function(search, replacement) {
+    var target = this;
+    return target.replace(new RegExp(search, "g"), replacement);
+};
+
+function generateSignature(filename, options, loggerTags) {
 
     // pull out all querystring parameters so they can be sorted and used in the signature
     const parameters = [];
@@ -58,9 +116,12 @@ function generateSignature(filename, options) {
     const ct = options.headers["Content-Type"] || "";
     const none = options.headers["If-None-Match"] || "";
 
-    // generate the signature line and sign it
+    // generate the signature line
     let raw = `PUT\n\n\n${len}\n\n${ct}\n\n\n\n${none}\n\n\n${xheaders.join("\n")}\n/${account}/${container}/${filename}`;
     raw += (parameters.length > 0) ? `\n${parameters.join("\n")}` : "";
+    logger.log("debug", `The unencoded signature is "${raw.replaceAll("\n", "\\n")}"`, loggerTags);
+
+    // sign it
     const hmac = crypto.createHmac("sha256", new Buffer.from(key, "base64"));
     const signature = hmac.update(raw, "utf-8").digest("base64");
     
@@ -69,12 +130,13 @@ function generateSignature(filename, options) {
 
 }
 
-function createAppendBlob(filename) {
+function createAppendBlob(filename, loggerTags, http409IsLoggedAsError = true) {
     return new Promise((resolve, reject) => {
-        console.log(`creating append blob "${filename}"...`);
+        logger.log("verbose", `creating append blob "${filename}"...`, loggerTags);
 
         // specify the request options, including the headers
         const options = {
+            agent: agent,
             url: `https://${account}.blob.core.windows.net/${container}/${filename}${sas || ""}`,
             headers: {
                 "x-ms-version": "2017-07-29",
@@ -87,20 +149,23 @@ function createAppendBlob(filename) {
 
         // generate and apply the signature
         if (!sas) {
-            const signature = generateSignature(filename, options);
+            const signature = generateSignature(filename, options, loggerTags);
             options.headers.Authorization = signature;
         }
         
         // execute
         request.put(options, (error, response, body) => {
             if (!error && response.statusCode >= 200 && response.statusCode < 300) {
-                console.log(`created append blob "${filename}".`);
+                logger.log("verbose", `created append blob "${filename}".`, loggerTags);
                 resolve();
             } else if (error) {
-                console.log(`failed to create append blob "${filename}": ${error}`);
+                logger.error(`failed to create append blob "${filename}": ${error}`, loggerTags);
                 reject(error);
+            } else if (response.statusCode === 409 && !http404IsLoggedAsError) {
+                logger.info(`failed to create append blob "${filename}" because it already exists: ${response.statusCode}: ${response.statusMessage}`, loggerTags);
+                reject(new Error(`${response.statusCode}: ${response.statusMessage}`));
             } else {
-                console.log(`failed to create append blob "${filename}": ${response.statusCode}: ${response.statusMessage}`);
+                logger.error(`failed to create append blob "${filename}": ${response.statusCode}: ${response.statusMessage}`, loggerTags);
                 reject(new Error(`${response.statusCode}: ${response.statusMessage}`));
             }
         });
@@ -108,11 +173,13 @@ function createAppendBlob(filename) {
     });
 }
 
-function appendToBlob(filename, row) {
+function appendToBlob(filename, row, loggerTags, http404IsLoggedAsError = true) {
     return new Promise((resolve, reject) => {
+        logger.log("verbose", `appending to blob "${filename}"...`, loggerTags);
 
         // specify the request options, including the headers
         const options = {
+            agent: agent,
             url: `https://${account}.blob.core.windows.net/${container}/${filename}${(sas) ? sas + "&" : "?"}comp=appendblock`,
             headers: {
                 "x-ms-version": "2017-07-29",
@@ -124,17 +191,23 @@ function appendToBlob(filename, row) {
         
         // generate and apply the signature
         if (!sas) {
-            const signature = generateSignature(filename, options);
+            const signature = generateSignature(filename, options, loggerTags);
             options.headers.Authorization = signature;
         }
         
         // execute
         request.put(options, (error, response, body) => {
             if (!error && response.statusCode >= 200 && response.statusCode < 300) {
+                logger.log("verbose", `appended blob "${filename}".`, loggerTags);
                 resolve();
             } else if (error) {
+                logger.error(`failed to append blob "${filename}": ${error}`, loggerTags);
                 reject(error);
+            } else if (response.statusCode === 404 && !http404IsLoggedAsError) {
+                logger.info(`failed to append blob "${filename}" which doesn't exist: ${response.statusCode}: ${response.statusMessage}`, loggerTags);
+                reject(new Error(`${response.statusCode}: ${response.statusMessage}`));
             } else {
+                logger.error(`failed to append blob "${filename}": ${response.statusCode}: ${response.statusMessage}`, loggerTags);
                 reject(new Error(`${response.statusCode}: ${response.statusMessage}`));
             }
         });
@@ -142,23 +215,23 @@ function appendToBlob(filename, row) {
     });
 }
 
-async function appendToBlobWithCreate(filename, row) {
+async function appendToBlobWithCreate(filename, row, loggerTags) {
 
     // optimistically try and write the record
     try {
-        await appendToBlob(filename, row);
+        await appendToBlob(filename, row, loggerTags, false);
     } catch (ex) {
         if (ex.message.substring(0, 4) === "404:") {
 
             // the blob doesn't exist, create it and then try the write again
             try {
-                await createAppendBlob(filename);
-                await appendToBlob(filename, row);
+                await createAppendBlob(filename, loggerTags, false);
+                await appendToBlob(filename, row, loggerTags);
             } catch (ex) {
                 if (ex.message.substring(0, 4) === "409:") {
 
                     // the blob was created by another process in a race condition
-                    await appendToBlob(filename, row);
+                    await appendToBlob(filename, row, loggerTags);
 
                 } else {
                     throw ex;
@@ -172,11 +245,13 @@ async function appendToBlobWithCreate(filename, row) {
 
 }
 
-function createBlockBlob(filename, body) {
+function createBlockBlob(filename, body, loggerTags) {
     return new Promise((resolve, reject) => {
+        logger.log("verbose", `creating block blob "${filename}"...`);
 
         // specify the request options, including the headers
         const options = {
+            agent: agent,
             url: `https://${account}.blob.core.windows.net/${container}/${filename}${sas || ""}`,
             headers: {
                 "x-ms-version": "2017-07-29",
@@ -189,17 +264,20 @@ function createBlockBlob(filename, body) {
 
         // generate and apply the signature
         if (!sas) {
-            const signature = generateSignature(filename, options);
+            const signature = generateSignature(filename, options, loggerTags);
             options.headers.Authorization = signature;
         }
         
         // execute
         request.put(options, (error, response, body) => {
             if (!error && response.statusCode >= 200 && response.statusCode < 300) {
+                logger.log("verbose", `created block blob "${filename}".`, loggerTags);
                 resolve();
             } else if (error) {
+                logger.error(`failed to create block blob "${filename}": ${error}`, loggerTags);
                 reject(error);
             } else {
+                logger.error(`failed to create block blob "${filename}": ${response.statusCode}: ${response.statusMessage}`, loggerTags);
                 reject(new Error(`${response.statusCode}: ${response.statusMessage}`));
             }
         });
@@ -235,11 +313,11 @@ async function readAllFiles(path) {
     const list = [];
     const filenames = await readFolder(path);
     for (const filename of filenames) {
-        console.log(`loading ${filename}...`);
+        logger.log("verbose", `loading ${filename}...`);
         const raw = await readFile(`${path}/${filename}`);
         const json = JSON.parse(raw);
         list.push(json);
-        console.log(`loaded ${filename}.`);
+        logger.log("verbose", `loaded ${filename}...`);
     }
     return list;
 }
@@ -249,65 +327,76 @@ readAllFiles("./schemas")
 .then(schemas => {
 
     // accept documents
-    app.post("/", (req, res) => {
-        const promises = [];
-
-        // determine the timeslice to apply the files to
-        const now = new moment();
-        const period_array = period.split(" ");
-        const period_last = now.floor(Number.parseInt(period_array[0]), period_array[1]);
-        const period_path = period_last.utc().format(format);
-        
-        // save the raw file
-        const raw = createBlockBlob(`${period_path}/name-${uuidv4()}.xml`, req.body);
-        promises.push(raw);
-
-        // parse the IDOC
-        const doc = new dom().parseFromString(req.body);
-
-        // find any matching schemas
-        for (const schema of schemas) {
-            if (xpath.select(schema.identify, doc).length > 0) {
-
-                // extract the fields
-                const row = [];
-                for (const field of schema.fields) {
-                    const enclosure = field.enclosure || "";
-                    const _default = field.default || "";
-                    const nodes = xpath.select(field.path, doc);
-                    if (nodes.length > 0) {
-                        row.push(`${enclosure}${nodes[0].firstChild.data}${enclosure}`); //nodes[0].localName is the node name
-                    } else {
-                        row.push(`${enclosure}${_default}${enclosure}`);
+    app.post("/", async (req, res) => {
+        const coorelationId = uuidv4();
+        logger.log("debug", `POST requested from ${req.ip}...`, { coorelationId: coorelationId });
+        try {
+            const promises = [];
+    
+            // determine the timeslice to apply the files to
+            const now = new moment();
+            const period_array = period.split(" ");
+            const period_last = now.floor(Number.parseInt(period_array[0]), period_array[1]);
+            const period_path = period_last.utc().format(format);
+            
+            // save the raw file
+            const raw = createBlockBlob(`${period_path}/name-${uuidv4()}.xml`, req.body, { coorelationId: coorelationId });
+            promises.push(raw);
+    
+            // parse the IDOC
+            const doc = new dom().parseFromString(req.body);
+    
+            // find any matching schemas
+            for (const schema of schemas) {
+                if (xpath.select(schema.identify, doc).length > 0) {
+                    logger.log("verbose", `schema identified as "${schema.name}".`, { coorelationId: coorelationId });
+    
+                    // extract the fields
+                    const row = [];
+                    for (const field of schema.fields) {
+                        const enclosure = field.enclosure || "";
+                        const _default = field.default || "";
+                        const nodes = xpath.select(field.path, doc);
+                        const column = ((nodes) => {
+                            if (nodes.length > 0) {
+                                return `${enclosure}${nodes[0].firstChild.data}${enclosure}`;
+                            } else {
+                                return `${enclosure}${_default}${enclosure}`;
+                            }
+                        })(nodes);    
+                        row.push(column);
                     }
+    
+                    // append to a CSV
+                    logger.log("debug", `row: ${row.join(",")}`, { coorelationId: coorelationId });
+                    const csv = appendToBlobWithCreate(`${period_path}/${schema.filename}`, row.join(","), { coorelationId: coorelationId });
+                    promises.push(csv);
+                    
                 }
-
-                // append to a CSV
-                const csv = appendToBlobWithCreate(`${period_path}/${schema.filename}`, row.join(","));
-                promises.push(csv);
-                
             }
-        }
-
-        // wait for all writes to finish
-        Promise.all(promises)
-        .then(_ => {
+    
+            // wait for all writes to finish
+            await Promise.all(promises);
+            logger.log("debug", `POST response is 200.`, { coorelationId: coorelationId });
             res.status(200).end();
-        })
-        .catch(ex => {
-            res.status(500).end();
-            console.error(ex);
-        });
 
+        } catch (ex) {
+
+            // handle any exceptions
+            logger.log("debug", `POST response is 500.`, { coorelationId: coorelationId });
+            res.status(500).end();
+            logger.error(ex.stack);
+
+        }
     });
 
     // start listening
     const port = process.env.PORT || 8080;
     app.listen(port, () => {
-        console.log(`Listening on port ${port}...`);
+        logger.log("info", `Listening on port ${port}...`);
     });
 
 })
 .catch(ex => {
-    console.error(ex);
+    logger.error(ex.stack);
 });
