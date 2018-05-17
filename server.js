@@ -1,10 +1,10 @@
 
 // includes
+require("dotenv").config();
 const winston = require("winston");
 const cmd = require("commander");
 const fs = require("fs");
 const agentKeepAlive = require("agentkeepalive");
-const config = require("config");
 const express = require("express");
 const bodyParser = require("body-parser");
 const request = require("request");
@@ -19,13 +19,43 @@ require("moment-round");
 // define command line parameters
 cmd
     .version("0.1.0")
-    .option("-l, --log-level <value>", "The minimum level to log to the console (error, warn, info, verbose, debug, silly).", /^(error|warn|info|verbose|debug|silly)$/i, "error")
+    .option("-l, --log-level <s>", `LOG_LEVEL. The minimum level to log to the console (error, warn, info, verbose, debug, silly). Defaults to "error".`, /^(error|warn|info|verbose|debug|silly)$/i)
     .option("-d, --debug", "Turn on debugging for the REST API calls.")
+    .option("-p, --port <n>", `PORT. The port to host the web services on. Defaults to "8080".`, parseInt)
+    .option("-a, --account <s>", `STORAGE_ACCOUNT. Required. The name of the Azure Storage Account.`)
+    .option("-c, --container <s>", `STORAGE_CONTAINER. Required. The name of the Azure Storage Account Container.`)
+    .option("-s, --sas <s>", `STORAGE_SAS. The Shared Access Signature querystring.`)
+    .option("-k, --key <s>", `STORAGE_KEY. The Azure Storage Account key.`)
+    .option("-t, --period <s>", `FOLDER_PERIOD. The period used to create the timeslice folders. Defaults to "1 hour".`)
+    .option("-f, --format <s>", `FOLDER_FORMAT. The format used for the timeslice folders. Defaults to "YYYYMMDDTHHmmss".`)
+    .on("--help", _ => {
+        console.log("");
+        console.log("Environment variables can be used instead of the command line options. The variable names are shown above.");
+        console.log("");
+        console.log("The following variables must be set:");
+        console.log("  STORAGE_ACCOUNT");
+        console.log("  STORAGE_CONTAINER");
+        console.log("");
+        console.log("One of the following must also be set:");
+        console.log("  STORAGE_SAS");
+        console.log("  STORAGE_KEY");
+        console.log("");
+    })
     .parse(process.argv);
+
+// globals
+const logLevel  = cmd.logLevel  || process.env.LOG_LEVEL          || "error";
+const port      = cmd.port      || process.env.PORT               || 8080;
+const account   = cmd.account   || process.env.STORAGE_ACCOUNT;
+const container = cmd.container || process.env.STORAGE_CONTAINER;
+const sas       = cmd.sas       || process.env.STORAGE_SAS;
+const key       = cmd.key       || process.env.STORAGE_KEY;
+const period    = cmd.period    || process.env.FOLDER_PERIOD      || "1 hour";
+const format    = cmd.format    || process.env.FOLDER_FORMAT      || "YYYYMMDDTHHmmss";
 
 // enable logging
 const logger = winston.createLogger({
-    level: cmd.logLevel,
+    level: logLevel,
     transports: [
         new winston.transports.Console({
             format: winston.format.combine(
@@ -53,22 +83,15 @@ const logger = winston.createLogger({
         })
     ]
 });
-console.log(`Log level set to "${cmd.logLevel}".`);
-if (cmd.debug) require('request-debug')(request);
 
-// globals
-const account = config.get("account");
+// log startup
+console.log(`Log level set to "${logLevel}".`);
+if (cmd.debug) require('request-debug')(request);
 logger.log("verbose", `account = "${account}".`);
-const container = config.get("container");
 logger.log("verbose", `container = "${container}".`);
-const key = (config.has("key")) ? config.get("key") : null;
 logger.log("verbose", `key is ${(key) ? "defined" : "undefined"}.`);
-//const sas = (config.has("sas")) ? config.get("sas") : null;
-const sas = null;
 logger.log("verbose", `sas is ${(key) ? "defined" : "undefined"}.`);
-const period = config.get("period");
 logger.log("verbose", `period = "${period}".`);
-const format = (config.has("format")) ? config.get("format") : "YYYYMMDDTHHmmss";
 logger.log("verbose", `format = "${format}".`);
 
 // use an HTTP(s) agent with keepalive and connection pooling
@@ -391,7 +414,6 @@ readAllFiles("./schemas")
     });
 
     // start listening
-    const port = process.env.PORT || 8080;
     app.listen(port, () => {
         logger.log("info", `Listening on port ${port}...`);
     });
