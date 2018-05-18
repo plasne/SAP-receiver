@@ -1,6 +1,7 @@
 {
     "name": "MATMA05",
-    "filename": "matmas.csv",
+    "filename": "matmas-${partition}.csv",
+    "partitions": 4,
     "identify": "/MATMAS05",
     "fields": [
         {
@@ -9,8 +10,7 @@
             "enclosure": "\""
         },
         {
-            "path": "/MATMAS05/IDOC/E1MARAM/E1MARCM/BESKZ",
-            "default": ""
+            "path": "/MATMAS05/IDOC/E1MARAM/E1MARCM/BESKZ"
         }
     ]
 }

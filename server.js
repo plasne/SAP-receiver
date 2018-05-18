@@ -44,14 +44,14 @@ cmd
     .parse(process.argv);
 
 // globals
-const logLevel  = cmd.logLevel  || process.env.LOG_LEVEL          || "error";
-const port      = cmd.port      || process.env.PORT               || 8080;
-const account   = cmd.account   || process.env.STORAGE_ACCOUNT;
-const container = cmd.container || process.env.STORAGE_CONTAINER;
-const sas       = cmd.sas       || process.env.STORAGE_SAS;
-const key       = cmd.key       || process.env.STORAGE_KEY;
-const period    = cmd.period    || process.env.FOLDER_PERIOD      || "1 hour";
-const format    = cmd.format    || process.env.FOLDER_FORMAT      || "YYYYMMDDTHHmmss";
+const logLevel   = cmd.logLevel   || process.env.LOG_LEVEL           || "error";
+const port       = cmd.port       || process.env.PORT                || 8080;
+const account    = cmd.account    || process.env.STORAGE_ACCOUNT;
+const container  = cmd.container  || process.env.STORAGE_CONTAINER;
+const sas        = cmd.sas        || process.env.STORAGE_SAS;
+const key        = cmd.key        || process.env.STORAGE_KEY;
+const period     = cmd.period     || process.env.FOLDER_PERIOD       || "1 hour";
+const format     = cmd.format     || process.env.FOLDER_FORMAT       || "YYYYMMDDTHHmmss";
 
 // enable logging
 const logger = winston.createLogger({
@@ -374,25 +374,32 @@ readAllFiles("./schemas")
                 if (xpath.select(schema.identify, doc).length > 0) {
                     logger.log("verbose", `schema identified as "${schema.name}".`, { coorelationId: coorelationId });
     
-                    // extract the fields
+                    // extract the columns
                     const row = [];
-                    for (const field of schema.fields) {
-                        const enclosure = field.enclosure || "";
-                        const _default = field.default || "";
-                        const nodes = xpath.select(field.path, doc);
-                        const column = ((nodes) => {
+                    for (const column of schema.columns) {
+                        const enclosure = column.enclosure || "";
+                        const _default = column.default || "";
+                        const nodes = xpath.select(column.path, doc);
+                        const output = ((nodes) => {
                             if (nodes.length > 0) {
                                 return `${enclosure}${nodes[0].firstChild.data}${enclosure}`;
                             } else {
                                 return `${enclosure}${_default}${enclosure}`;
                             }
                         })(nodes);    
-                        row.push(column);
+                        row.push(output);
                     }
     
+                    // determine the filename
+                    let partition = schema.partition || 1;
+                    const filename = schema.filename.replace("${partition}", partition);
+                    partition++;
+                    if (partition > (schema.partitions || 1)) partition = 1;
+                    schema.partition = partition;
+
                     // append to a CSV
                     logger.log("debug", `row: ${row.join(",")}`, { coorelationId: coorelationId });
-                    const csv = appendToBlobWithCreate(`${period_path}/${schema.filename}`, row.join(","), { coorelationId: coorelationId });
+                    const csv = appendToBlobWithCreate(`${period_path}/${filename}`, row.join(","), { coorelationId: coorelationId });
                     promises.push(csv);
                     
                 }
