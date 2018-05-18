@@ -158,7 +158,7 @@ You can configure this in a schema like this:
     "filename": "matmas-${partition}.csv",
     "partitions": 4,
     "identify": "/MATMAS05",
-    "fields": [ ... ]
+    "fields": [ ]
 }
 ```
 
