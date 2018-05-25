@@ -54,6 +54,14 @@ const period     = cmd.period     || process.env.FOLDER_PERIOD       || "1 hour"
 const format     = cmd.format     || process.env.FOLDER_FORMAT       || "YYYYMMDDTHHmmss";
 
 // enable logging
+const logColors = {
+    "error":   "\x1b[31m", // red
+    "warn":    "\x1b[33m", // yellow
+    "info":    "",         // white
+    "verbose": "\x1b[32m", // green
+    "debug":   "\x1b[32m", // green
+    "silly":   "\x1b[32m"  // green
+};
 const logger = winston.createLogger({
     level: logLevel,
     transports: [
@@ -61,17 +69,7 @@ const logger = winston.createLogger({
             format: winston.format.combine(
                 winston.format.timestamp(),
                 winston.format.printf(event => {
-                    const color = ((level) => {
-                        switch (level) {
-                            case "error":   return "\x1b[31m"; // red
-                            case "warn":    return "\x1b[33m"; // yellow
-                            case "info":    return "";         // white
-                            case "verbose": return "\x1b[32m"; // green
-                            case "debug":   return "\x1b[32m"; // green
-                            case "silly":   return "\x1b[32m"; // green
-                            default:        return "";         // white
-                        }
-                    })(event.level);
+                    const color = logColors[event.level] || "";
                     const level = event.level.padStart(7);
                     if (event.coorelationId) {
                         return `${event.timestamp} ${color}${level}\x1b[0m ${event.coorelationId}: ${event.message}`;
