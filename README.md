@@ -6,21 +6,21 @@ This application was written to accept IDOCs from SAP, write the unmodified XML 
 
 There are a few interesting things regarding the use of Azure Blob Storage:
 
-* The unmodified XML files are written as Block Blobs.
+-   The unmodified XML files are written as Block Blobs.
 
-* Each CSV row is appended to an Append Blob. This allows for very fast append operations even from multiple writers.
+-   Each CSV row is appended to an Append Blob. This allows for very fast append operations even from multiple writers.
 
-* All writes are committed asynchronously, but all must complete before a response code is sent.
+-   All writes are committed asynchronously, but all must complete before a response code is sent.
 
-* The CSV write is optimistic, meaning it attempts to commit the block whether or not the file exists. Most of the time the file exists and so no error happens. If the file does not exist, a call is made to create it and then append it. This results in 1 more service call if the file doesn't exist, but 1 fewer service call whenever it does (the most common case).
+-   The CSV write is optimistic, meaning it attempts to commit the block whether or not the file exists. Most of the time the file exists and so no error happens. If the file does not exist, a call is made to create it and then append it. This results in 1 more service call if the file doesn't exist, but 1 fewer service call whenever it does (the most common case).
 
-* Content extracted from the XML could be part of 0, 1, or many CSV schemas, resulting in the same number of write operations (CSV files).
+-   Content extracted from the XML could be part of 0, 1, or many CSV schemas, resulting in the same number of write operations (CSV files).
 
-* An operation to create a Blob that already exists normally wipes the existing content, but using the header "If-None-Match: *", we can get a 409 error instead.
+-   An operation to create a Blob that already exists normally wipes the existing content, but using the header "If-None-Match: \*", we can get a 409 error instead.
 
-* Multiple writers to an Append Blob is only supported in the .NET SDK, so this sample uses the Azure Storage REST API directly. When using multiple writers in this way, the **order the rows are committed to the CSV file is not guaranteed**.
+-   Multiple writers to an Append Blob is only supported in the .NET SDK, so this sample uses the Azure Storage REST API directly. When using multiple writers in this way, the **order the rows are committed to the CSV file is not guaranteed**.
 
-* The code supports using either a SAS querystring (preferred) or a storage key.
+-   The code supports using either a SAS querystring (preferred) or a storage key.
 
 ## Configuration
 
@@ -126,27 +126,27 @@ Consider this example:
             "enclosure": "\""
         },
         {
-            "path": "/MATMAS05/IDOC/E1MARAM/E1MARCM/BESKZ",
+            "path": "/MATMAS05/IDOC/E1MARAM/E1MARCM/BESKZ"
         }
     ]
 }
 ```
 
-* name - This identifies the schema in the logs.
-* filename - This can be a filename or a full path (ex. folder/folder/file.csv).
-* identify - This is an XPATH string. If the XML document being examined returns 1 or more rows after executing that query, this schema will be used (ie. the row will be committed to the CSV file).
-* columns - The columns (in order) as they will be committed to the CSV.
-  * path - The XPATH string that will be used to identify the node. The inner content of that node will be extracted as the column value.
-  * default - Optionally, you may specify a default value if the node isn't found. Otherwise, the default will be empty.
-  * enclosure - Optionally, you may specify a string to be included at the start and end of the column value (as shown here, a ").
+-   name - This identifies the schema in the logs.
+-   filename - This can be a filename or a full path (ex. folder/folder/file.csv).
+-   identify - This is an XPATH string. If the XML document being examined returns 1 or more rows after executing that query, this schema will be used (ie. the row will be committed to the CSV file).
+-   columns - The columns (in order) as they will be committed to the CSV.
+    -   path - The XPATH string that will be used to identify the node. The inner content of that node will be extracted as the column value.
+    -   default - Optionally, you may specify a default value if the node isn't found. Otherwise, the default will be empty.
+    -   enclosure - Optionally, you may specify a string to be included at the start and end of the column value (as shown here, a ").
 
 ## CSV Partitioning
 
 Given...
 
-* Append Blobs cannot have more than 50,000 blocks
-* Each write operation is a block
-* Each row is written independently in this application (so there doesn't have to be any persistent caching)
+-   Append Blobs cannot have more than 50,000 blocks
+-   Each write operation is a block
+-   Each row is written independently in this application (so there doesn't have to be any persistent caching)
 
 ...if you expect any of your CSV files to have more than 50,000 rows, you need to partition the file.
 
@@ -158,7 +158,7 @@ You can configure this in a schema like this:
     "filename": "matmas-${partition}.csv",
     "partitions": 4,
     "identify": "/MATMAS05",
-    "fields": [ ]
+    "fields": []
 }
 ```
 

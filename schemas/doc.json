@@ -1,0 +1,24 @@
+{
+    "name": "doc",
+    "filename": "doc.csv",
+    "identify": "/doc",
+    "columns": [
+        {
+            "header": "ID",
+            "path": "/doc/id"
+        },
+        {
+            "header": "Name",
+            "path": "/doc/name"
+        },
+        {
+            "header": "C0",
+            "path": "/doc/c0"
+        },
+        {
+            "header": "Short",
+            "path": "/doc/short",
+            "enclosure": "\""
+        }
+    ]
+}

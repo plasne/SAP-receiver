@@ -3,13 +3,15 @@
     "filename": "matmas-${partition}.csv",
     "partitions": 4,
     "identify": "/MATMAS05",
-    "fields": [
+    "columns": [
         {
+            "header": "DOCNUM",
             "path": "/MATMAS05/IDOC/EDI_DC40/DOCNUM",
             "default": "0000000000000000",
             "enclosure": "\""
         },
         {
+            "header": "BESKZ",
             "path": "/MATMAS05/IDOC/E1MARAM/E1MARCM/BESKZ"
         }
     ]
